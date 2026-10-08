@@ -1,0 +1,397 @@
+<title>SIFT Curation Report</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: an instrument readout. Summary strip, then explorer (scene | ranked list), then evidence panels. */
+:root {
+  --bg: #f2f4f6; --surface: #ffffff; --ink: #16212c; --muted: #5a6876; --line: #d8dee5; --faint: #eef1f4;
+  --accent: #1d5bbf;
+  --v-keep: #2b8a6b; --v-redundant: #8a90a8; --v-harmful: #d07a22; --v-noisy: #9a62c2; --v-mismatch: #cf3f4a;
+  --t-red: #d6363f; --t-green: #229a5a; --t-blue: #2e5cd2;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e141a; --surface: #151d25; --ink: #e2e8ee; --muted: #93a2b1; --line: #27323d; --faint: #1b252f;
+  --accent: #74a3f0; --v-keep: #4cbf97; --v-redundant: #9aa0ba; --v-harmful: #eb9a4b; --v-noisy: #b98ce0; --v-mismatch: #ee6a73;
+  --t-red: #ec5a62; --t-green: #3cbf7a; --t-blue: #6b93f2; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0e141a; --surface: #151d25; --ink: #e2e8ee; --muted: #93a2b1; --line: #27323d; --faint: #1b252f;
+  --accent: #74a3f0; --v-keep: #4cbf97; --v-redundant: #9aa0ba; --v-harmful: #eb9a4b; --v-noisy: #b98ce0; --v-mismatch: #ee6a73;
+  --t-red: #ec5a62; --t-green: #3cbf7a; --t-blue: #6b93f2; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body); margin: 0; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 64px; display: grid; gap: 36px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: 0.005em; }
+h1 { font-size: 2.1rem; line-height: 1.1; }
+h2 { font-size: 1.35rem; }
+h3 { font-size: 1rem; }
+p { margin: 0; max-width: 68ch; }
+.muted { color: var(--muted); }
+.mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.eyebrow { font: 500 0.72rem/1 var(--mono); text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); }
+section { display: grid; gap: 14px; min-width: 0; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; min-width: 0; }
+a { color: var(--accent); }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* header */
+header { display: grid; gap: 10px; }
+.wordmark { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.wordmark h1 span { color: var(--accent); }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 0.8rem/1.4 var(--mono); color: var(--muted); }
+
+/* verdict strip */
+.strip { display: flex; height: 30px; border-radius: 4px; overflow: hidden; border: 1px solid var(--line); }
+.strip div { min-width: 2px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.legend button { background: none; border: 0; padding: 2px 0; cursor: pointer; display: flex; gap: 8px; align-items: baseline; text-align: left; }
+.legend .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; transform: translateY(1px); }
+.legend b { font: 600 1.05rem var(--mono); }
+.legend small { color: var(--muted); }
+.headline { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.headline .panel { display: grid; gap: 4px; }
+.headline .big { font: 600 1.9rem/1.1 var(--display); font-variant-numeric: tabular-nums; }
+
+/* explorer */
+.explorer { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .explorer { grid-template-columns: minmax(0, 1fr); } }
+.scene-wrap { display: grid; gap: 12px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); }
+@media (max-width: 860px) { .scene-wrap { position: static; } }
+canvas#scene { width: 100%; max-width: 100%; aspect-ratio: 1 / 1; display: block; background: var(--faint); border-radius: 4px; }
+.detail { display: grid; gap: 10px; font-size: 0.9rem; }
+.detail .row { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pill { display: inline-block; font: 500 0.72rem/1 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 7px; border-radius: 3px; color: #fff; white-space: nowrap; }
+.bars { display: grid; gap: 4px; }
+.bar { display: grid; grid-template-columns: 9.5em minmax(0, 1fr) 3.2em; gap: 8px; align-items: center; font-size: 0.82rem; }
+.bar .track { height: 8px; background: var(--faint); border-radius: 2px; overflow: hidden; }
+.bar .fill { height: 100%; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { background: var(--faint); border: 1px solid var(--line); border-radius: 3px; padding: 2px 7px; font: 0.78rem var(--mono); cursor: pointer; }
+.chip:hover { border-color: var(--accent); }
+.truth { border-top: 1px dashed var(--line); padding-top: 8px; font-size: 0.82rem; }
+
+.listhead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.filters button { border: 1px solid var(--line); background: var(--surface); border-radius: 3px; padding: 4px 9px; font-size: 0.8rem; cursor: pointer; }
+.filters button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.list { max-height: 640px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.84rem; }
+th { position: sticky; top: 0; background: var(--surface); text-align: left; font: 500 0.7rem var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 8px; border-bottom: 1px solid var(--line); z-index: 1; }
+td { padding: 6px 8px; border-bottom: 1px solid var(--faint); white-space: nowrap; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--faint); }
+tbody tr[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+svg text { fill: var(--muted); font: 11px var(--mono); }
+svg .axis { stroke: var(--line); }
+
+/* evidence */
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px; }
+.chart { width: 100%; height: auto; display: block; }
+.tablewrap { overflow-x: auto; }
+.tablewrap table td, .tablewrap table th { white-space: normal; }
+.tablewrap td.num { white-space: nowrap; }
+.how { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 12px; }
+.how .panel { display: grid; gap: 6px; align-content: start; }
+.formula { font: 0.86rem/1.5 var(--mono); background: var(--faint); border-radius: 4px; padding: 10px 12px; overflow-x: auto; }
+.caveats { display: grid; gap: 8px; padding-left: 1.1em; margin: 0; max-width: 80ch; }
+@media (prefers-reduced-motion: no-preference) { tbody tr, .chip, .filters button { transition: background .12s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="wordmark"><h1><span>SIFT</span> curation report</h1><span class="eyebrow">marginal-value curation for robot demonstrations</span></div>
+    <p class="muted" id="lede"></p>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <section aria-labelledby="h-found">
+    <h2 id="h-found">What SIFT found</h2>
+    <div class="strip" id="strip" role="img"></div>
+    <div class="legend" id="legend"></div>
+    <div class="headline" id="headline"></div>
+  </section>
+
+  <section aria-labelledby="h-explore">
+    <div class="listhead"><h2 id="h-explore">Explore the ranking</h2><span class="muted" style="font-size:.85rem">Select a row to see the demo in its scene, the judge's reading, and its influence across seeds.</span></div>
+    <div class="explorer">
+      <div class="scene-wrap">
+        <canvas id="scene" width="560" height="560" aria-label="Top-down view of the selected demonstration"></canvas>
+        <div class="panel detail" id="detail"></div>
+      </div>
+      <div style="display:grid;gap:10px;min-width:0">
+        <div class="filters" id="filters" role="group" aria-label="Filter by verdict"></div>
+        <div class="list"><table><thead><tr><th>Rank</th><th>Demo</th><th>Label</th><th>Verdict</th><th>Influence (±1 sd)</th><th>Truth</th></tr></thead><tbody id="rows"></tbody></table></div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-scale">
+    <h2 id="h-scale">Does curation pay off in closed loop?</h2>
+    <p class="muted" id="scale-lede"></p>
+    <div class="panel"><svg id="scaling" class="chart" viewBox="0 0 900 400" role="img" aria-label="Success rate versus fraction of data kept"></svg><div class="legend" id="scale-legend"></div></div>
+  </section>
+
+  <section aria-labelledby="h-trust">
+    <h2 id="h-trust">Can you trust the scores?</h2>
+    <p class="muted">Every corruption here was injected on purpose, so each detector can be graded against an answer key. On real data there is none, which is why these checks come first.</p>
+    <div class="grid2">
+      <div class="panel" style="display:grid;gap:8px"><h3>Influence by ground-truth type</h3><p class="muted" style="font-size:.85rem">Mean TracIn score across seeds, in units of its standard deviation. Bad demos should sit left of zero.</p><svg id="strip-plot" class="chart" viewBox="0 0 460 250"></svg></div>
+      <div class="panel" style="display:grid;gap:8px"><h3>Seed stability</h3><p class="muted" style="font-size:.85rem" id="stab-lede"></p><svg id="seed-scatter" class="chart" viewBox="0 0 460 250"></svg></div>
+    </div>
+    <div class="grid2">
+      <div class="panel" style="display:grid;gap:8px"><h3>Detector accuracy</h3><div class="tablewrap"><table id="det"></table></div></div>
+      <div class="panel" style="display:grid;gap:8px"><h3>Which validation gradient?</h3><p class="muted" style="font-size:.85rem">AUROC for ranking mislabeled and failed demos below good ones (0.5 is chance).</p><div class="tablewrap"><table id="abl"></table></div></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-how">
+    <h2 id="h-how">How the score is built</h2>
+    <div class="how">
+      <div class="panel"><span class="eyebrow">Influence</span><h3>TracIn over checkpoints</h3><div class="formula">I(z<sub>i</sub>) = &Sigma;<sub>t</sub> &eta;<sub>t</sub> &lang;&nabla;L(z<sub>i</sub>;&theta;<sub>t</sub>), P<sub>t</sub>&nabla;L(D<sub>val</sub>;&theta;<sub>t</sub>)&rang;</div><p class="muted" style="font-size:.88rem">Did a step on this demo push the policy toward or away from good behaviour? D<sub>val</sub> is the policy's own sim rollouts, relabelled by the expert. P<sub>t</sub> is Adam's preconditioner.</p></div>
+      <div class="panel"><span class="eyebrow">Redundancy</span><h3>Duplicates in action space</h3><p class="muted" style="font-size:.88rem">Effector path plus commands, resampled; blocked with Euclidean distance, confirmed with DTW, joined by union-find. The best-scoring member of each cluster is kept.</p></div>
+      <div class="panel"><span class="eyebrow">Consistency</span><h3>Counterfactual instruction judge</h3><p class="muted" style="font-size:.88rem">A cross-fitted policy scores each demo's actions under every instruction. If another instruction explains the motion 3&times; better than its label, the label is flagged.</p></div>
+      <div class="panel"><span class="eyebrow">Ranking</span><h3>Pessimistic order</h3><p class="muted" style="font-size:.88rem">Keep, then redundant, harmful, noisy, mismatch. Inside each tier, sort by mean &minus; 1 sd influence across seeds, so a demo must help consistently to rank high.</p></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-limits">
+    <h2 id="h-limits">Limits of this run</h2>
+    <ul class="caveats muted" id="caveats"></ul>
+  </section>
+</div>
+
+<script type="application/json" id="sift-data">/*__SIFT_DATA__*/</script>
+<script>
+(() => {
+const D = JSON.parse(document.getElementById("sift-data").textContent);
+const T = D.trajectories, N = T.length;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const VERDICTS = ["keep", "redundant", "harmful", "noisy", "mismatch"];
+const VLABEL = {keep: "Keep", redundant: "Redundant", harmful: "Harmful", noisy: "Noisy motion", mismatch: "Label mismatch"};
+const VDESC = {keep: "unique and helpful", redundant: "near-duplicate of a kept demo", harmful: "consistently negative influence", noisy: "no instruction explains the motion", mismatch: "instruction contradicts motion"};
+const TAGLABEL = {clean: "clean", duplicate: "duplicate", mislabeled: "mislabeled", failed: "failed", scene_reuse: "scene reuse"};
+const COLORS = ["red", "green", "blue"];
+const vcol = v => css("--v-" + v);
+const tcol = k => css("--t-" + COLORS[k]);
+const pct = x => Math.round(x * 100) + "%";
+const fmt = (x, d = 2) => Number(x).toFixed(d);
+const el = (tag, attrs = {}, html = "") => { const e = document.createElement(tag); for (const k in attrs) e.setAttribute(k, attrs[k]); e.innerHTML = html; return e; };
+const svgNS = "http://www.w3.org/2000/svg";
+const S = (tag, attrs = {}) => { const e = document.createElementNS(svgNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
+const sd = a => { const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / a.length); };
+const iscale = sd(T.map(t => t.infl_mean)) || 1;
+const z = x => x / iscale;
+
+/* header */
+const M = D.meta, cfg = M.config, sc = D.scaling;
+document.getElementById("lede").textContent =
+  `${N} language-conditioned reaching demonstrations, each ranked by how much it helps a behaviour-cloning policy succeed in closed loop. ` +
+  `The data is synthetic, with known corruptions, so every claim below is checked against ground truth.`;
+document.getElementById("meta").innerHTML = [
+  `${N} demos`, `${cfg.seeds.length} seeds × ${cfg.n_checkpoints} checkpoints`,
+  `validation gradient: ${cfg.val_mode === "rollout" ? "DAgger-relabelled sim rollouts" : "held-out demos"}`,
+  `${cfg.steps} steps per policy`, `eval: ${cfg.n_eval} held-out episodes/seed`, `run time ${M.timings.total}s`
+].map(s => `<span>${s}</span>`).join("");
+
+/* verdict strip */
+const strip = document.getElementById("strip"), legend = document.getElementById("legend");
+strip.setAttribute("aria-label", VERDICTS.map(v => `${D.counts[v]} ${v}`).join(", "));
+VERDICTS.forEach(v => {
+  const n = D.counts[v]; if (!n) return;
+  strip.append(el("div", {style: `flex:${n};background:var(--v-${v})`, title: `${VLABEL[v]}: ${n}`}));
+  const b = el("button", {type: "button"}, `<span class="sw" style="background:var(--v-${v})"></span><span><b>${n}</b> ${VLABEL[v]}<br><small>${VDESC[v]}</small></span>`);
+  b.onclick = () => setFilter(v);
+  legend.append(b);
+});
+
+/* headline */
+const fr = sc.fractions, cur = sc.curves;
+const mf = sc.matching_fraction.SIFT;
+const at = f => { const i = fr.indexOf(f); return i < 0 ? null : cur.SIFT.mean[i]; };
+const best = fr.reduce((b, f, i) => cur.SIFT.mean[i] > cur.SIFT.mean[b] ? i : b, 0);
+const H = [
+  [mf == null ? "no match" : pct(mf), "of the data, ranked by SIFT, matches full-data success",
+   mf == null ? "SIFT's subsets never reached the full-data mean." : `${pct(at(mf))} vs ${pct(sc.full.mean)} with all ${N} demos (mean of ${cfg.seeds.length} seeds).`],
+  [pct(cur.SIFT.mean[best]), `success at ${pct(fr[best])} of the data`, `Full data: ${pct(sc.full.mean)} ± ${fmt(sc.full.std * 100, 0)} pts. Ground-truth clean set: ${pct(sc.oracle.mean)}.`],
+  [`${D.detection.mismatch_judge.flagged}`, "instruction mismatches flagged", `${pct(D.detection.mismatch_judge.precision)} precision, ${pct(D.detection.mismatch_judge.recall)} recall against injected mislabels.`],
+  [`ρ ${fmt(mean(offdiag(D.stability.spearman)))}`, "rank correlation of influence between seeds", `Top-30% sets overlap ${pct(D.stability.top30_jaccard)} (Jaccard). Influence is noisy; treat single scores with care.`],
+];
+function offdiag(M) { const o = []; M.forEach((r, i) => r.forEach((x, j) => { if (j > i) o.push(x); })); return o; }
+const hl = document.getElementById("headline");
+H.forEach(([big, lab, sub]) => hl.append(el("div", {class: "panel"}, `<span class="big">${big}</span><span>${lab}</span><span class="muted" style="font-size:.82rem">${sub}</span>`)));
+
+/* explorer */
+let filter = "all", selected = T.slice().sort((a, b) => a.rank - b.rank)[0].id;
+const fbox = document.getElementById("filters");
+const FILTERS = [["all", "All"], ...VERDICTS.map(v => [v, VLABEL[v]]), ["disagree", "SIFT vs truth disagree"]];
+FILTERS.forEach(([k, lab]) => { const b = el("button", {type: "button", "data-k": k, "aria-pressed": k === filter}, lab); b.onclick = () => setFilter(k); fbox.append(b); });
+function setFilter(k) { filter = k; fbox.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.k === k)); renderRows(); }
+const BADTAG = {mislabeled: 1, failed: 1};
+const kept = t => t.verdict === "keep" || t.verdict === "redundant";
+const disagrees = t => kept(t) === !!BADTAG[t.tag];
+const lo = Math.min(...T.map(t => z(t.infl_mean - t.infl_std))), hi = Math.max(...T.map(t => z(t.infl_mean + t.infl_std)));
+function inflCell(t) {
+  const W = 120, X = v => (z(v) - lo) / (hi - lo) * W;
+  const x0 = X(0), xm = X(t.infl_mean), a = X(t.infl_mean - t.infl_std), b = X(t.infl_mean + t.infl_std);
+  const c = t.infl_mean >= 0 ? "var(--v-keep)" : "var(--v-mismatch)";
+  return `<svg width="${W}" height="14" viewBox="0 0 ${W} 14" aria-label="influence ${fmt(z(t.infl_mean))} sd"><line x1="${x0}" x2="${x0}" y1="0" y2="14" stroke="var(--line)"/><rect x="${Math.min(x0, xm)}" y="4" width="${Math.abs(xm - x0)}" height="6" fill="${c}" opacity=".75"/><line x1="${a}" x2="${b}" y1="7" y2="7" stroke="var(--ink)" stroke-width="1"/></svg> <span class="num muted">${z(t.infl_mean) >= 0 ? "+" : ""}${fmt(z(t.infl_mean))}</span>`;
+}
+const rowsEl = document.getElementById("rows");
+function renderRows() {
+  rowsEl.innerHTML = "";
+  T.slice().sort((a, b) => a.rank - b.rank).filter(t => filter === "all" ? true : filter === "disagree" ? disagrees(t) : t.verdict === filter).forEach(t => {
+    const tr = el("tr", {"aria-selected": t.id === selected, tabindex: 0}, `<td class="num">${t.rank + 1}</td><td class="num">#${t.id}</td><td><span class="dot" style="background:var(--t-${COLORS[t.instr]})"></span>${COLORS[t.instr]}</td><td><span class="pill" style="background:var(--v-${t.verdict})">${VLABEL[t.verdict]}</span></td><td>${inflCell(t)}</td><td class="muted mono" style="font-size:.78rem">${TAGLABEL[t.tag]}</td>`);
+    tr.onclick = () => select(t.id);
+    tr.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(t.id); } };
+    rowsEl.append(tr);
+  });
+}
+function select(id) { selected = id; rowsEl.querySelectorAll("tr").forEach(r => r.setAttribute("aria-selected", r.querySelector("td:nth-child(2)").textContent === "#" + id)); drawScene(); renderDetail(); }
+
+const cv = document.getElementById("scene"), ctx = cv.getContext("2d");
+function drawScene() {
+  const t = T[selected], W = cv.width, P = 28, sx = x => P + x * (W - 2 * P), sy = y => W - P - y * (W - 2 * P);
+  ctx.clearRect(0, 0, W, W);
+  ctx.strokeStyle = css("--line"); ctx.lineWidth = 1;
+  for (let g = 0; g <= 10; g++) { const v = g / 10; ctx.beginPath(); ctx.moveTo(sx(v), sy(0)); ctx.lineTo(sx(v), sy(1)); ctx.moveTo(sx(0), sy(v)); ctx.lineTo(sx(1), sy(v)); ctx.stroke(); }
+  // same-scene demos (what an image embedding would call duplicates)
+  T.filter(o => o.id !== t.id && t.scene_cluster >= 0 && o.scene_cluster === t.scene_cluster && o.dup_cluster !== t.dup_cluster).forEach(o => path(o, css("--muted"), 1.2, [5, 5]));
+  // action-space cluster mates
+  T.filter(o => o.id !== t.id && t.dup_cluster >= 0 && o.dup_cluster === t.dup_cluster).forEach(o => path(o, vcol("redundant"), 1.2));
+  // targets
+  t.targets.forEach((p, k) => {
+    ctx.beginPath(); ctx.arc(sx(p[0]), sy(p[1]), 15, 0, 7); ctx.fillStyle = tcol(k); ctx.globalAlpha = k === t.instr ? 1 : 0.55; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(sx(p[0]), sy(p[1]), M.success_radius * (W - 2 * P), 0, 7); ctx.strokeStyle = tcol(k); ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
+    if (k === t.instr) { ctx.fillStyle = css("--ink"); ctx.font = "500 12px " + css("--mono"); ctx.fillText("instructed", sx(p[0]) + 20, sy(p[1]) + 4); }
+  });
+  path(t, css("--ink"), 2.6);
+  const s = t.pos[0], e = t.pos[t.pos.length - 1];
+  ctx.beginPath(); ctx.arc(sx(s[0]), sy(s[1]), 6, 0, 7); ctx.strokeStyle = css("--ink"); ctx.lineWidth = 2; ctx.stroke();
+  ctx.beginPath(); ctx.arc(sx(e[0]), sy(e[1]), 5, 0, 7); ctx.fillStyle = css("--ink"); ctx.fill();
+  function path(o, color, w, dash) { ctx.beginPath(); o.pos.forEach((p, i) => i ? ctx.lineTo(sx(p[0]), sy(p[1])) : ctx.moveTo(sx(p[0]), sy(p[1]))); ctx.strokeStyle = color; ctx.lineWidth = w; ctx.setLineDash(dash || []); ctx.stroke(); ctx.setLineDash([]); }
+}
+function renderDetail() {
+  const t = T[selected], det = document.getElementById("detail");
+  const mates = T.filter(o => o.id !== t.id && t.dup_cluster >= 0 && o.dup_cluster === t.dup_cluster);
+  const seeds = t.infl_seeds.map(z), ext = Math.max(...T.map(o => Math.max(...o.infl_seeds.map(v => Math.abs(z(v)))))) ;
+  const sxs = v => 6 + (v + ext) / (2 * ext) * 288;
+  const dots = seeds.map((v, i) => `<circle cx="${sxs(v)}" cy="11" r="4.5" fill="var(--accent)" opacity=".8"><title>seed ${i}: ${fmt(v)}</title></circle>`).join("");
+  const truthOK = !disagrees(t);
+  det.innerHTML = `
+    <div class="row"><strong>Demo #${t.id} · rank ${t.rank + 1} of ${N}</strong><span class="pill" style="background:var(--v-${t.verdict})">${VLABEL[t.verdict]}</span></div>
+    <div>Label: <span class="dot" style="background:var(--t-${COLORS[t.instr]})"></span><em>"${M.instructions[t.instr]}"</em></div>
+    <div class="bars" aria-label="Judge: which instruction explains the motion">${t.judge_probs.map((p, k) => `<div class="bar"><span><span class="dot" style="background:var(--t-${COLORS[k]})"></span>${COLORS[k]}${k === t.instr ? " (label)" : ""}</span><span class="track"><span class="fill" style="display:block;width:${p * 100}%;background:var(--t-${COLORS[k]})"></span></span><span class="num">${fmt(p)}</span></div>`).join("")}</div>
+    <div class="muted" style="font-size:.82rem">Judge: ${t.judge_why}. Best-case motion loss ${fmt(t.oof_loss, 3)}.</div>
+    <div><span class="eyebrow">Influence per seed (sd units)</span><svg width="100%" viewBox="0 0 300 22" style="max-width:300px;display:block"><line x1="${sxs(0)}" x2="${sxs(0)}" y1="0" y2="22" stroke="var(--line)"/><line x1="6" x2="294" y1="11" y2="11" stroke="var(--line)"/>${dots}</svg><span class="num muted" style="font-size:.8rem">mean ${fmt(z(t.infl_mean))} · sd ${fmt(z(t.infl_std))} · self-influence ${fmt(t.self_infl / iscale, 1)}</span></div>
+    ${mates.length ? `<div><span class="eyebrow">Action-space twins (${mates.length})</span><div class="chips">${mates.map(o => `<button type="button" class="chip" data-id="${o.id}">#${o.id} ${o.verdict === "redundant" ? "redundant" : "kept"}</button>`).join("")}</div></div>` : ""}
+    <div class="truth"><span class="eyebrow">Ground truth</span> <span class="mono">${TAGLABEL[t.tag]}</span>${t.tag === "mislabeled" ? ` (robot actually went to ${COLORS[t.executed]})` : ""} · <span style="color:${truthOK ? "var(--v-keep)" : "var(--v-mismatch)"}">${truthOK ? "SIFT agrees" : "SIFT disagrees"}</span></div>`;
+  det.querySelectorAll(".chip").forEach(c => c.onclick = () => select(+c.dataset.id));
+}
+
+/* scaling chart */
+function scaling() {
+  const svg = document.getElementById("scaling"); svg.innerHTML = ""; document.getElementById("scale-legend").innerHTML = ""; const W = 900, Hh = 400, L = 54, R = 20, Tp = 30, B = 44;
+  const x = f => L + f * (W - L - R), y = v => Tp + (1 - v) * (Hh - Tp - B);
+  for (let v = 0; v <= 1.0001; v += 0.2) { svg.append(S("line", {x1: L, x2: W - R, y1: y(v), y2: y(v), class: "axis"})); const t = S("text", {x: L - 8, y: y(v) + 4, "text-anchor": "end"}); t.textContent = pct(v); svg.append(t); }
+  [0, 0.2, 0.4, 0.6, 0.8, 1].forEach(f => { const t = S("text", {x: x(f), y: Hh - B + 18, "text-anchor": "middle"}); t.textContent = pct(f); svg.append(t); });
+  const xl = S("text", {x: (L + W - R) / 2, y: Hh - 6, "text-anchor": "middle"}); xl.textContent = "fraction of demonstrations kept (fixed step budget)"; svg.append(xl);
+  const yl = S("text", {x: 14, y: (Tp + Hh - B) / 2, transform: `rotate(-90 14 ${(Tp + Hh - B) / 2})`, "text-anchor": "middle"}); yl.textContent = "closed-loop success"; svg.append(yl);
+  const series = [["SIFT", "--accent", 3], ["Filters only", "--v-noisy", 2], ["TracIn only", "--v-harmful", 2], ["Random", "--muted", 2]];
+  // full-data line and oracle point
+  svg.append(S("line", {x1: L, x2: W - R, y1: y(sc.full.mean), y2: y(sc.full.mean), stroke: css("--ink"), "stroke-dasharray": "6 5", "stroke-width": 1.5}));
+  const ft = S("text", {x: W - R, y: y(sc.full.mean) - 6, "text-anchor": "end"}); ft.textContent = `all ${N} demos: ${pct(sc.full.mean)}`; svg.append(ft);
+  svg.append(S("circle", {cx: x(sc.oracle.fraction), cy: y(sc.oracle.mean), r: 6, fill: "none", stroke: css("--v-keep"), "stroke-width": 2}));
+  const ot = S("text", {x: x(sc.oracle.fraction), y: y(sc.oracle.mean) - 12, "text-anchor": "middle"}); ot.textContent = `ground-truth clean set (${pct(sc.oracle.fraction)} of data)`; svg.append(ot);
+  series.forEach(([name, col, w]) => {
+    const c = cur[name]; if (!c) return;
+    const up = fr.map((f, i) => `${x(f)},${y(Math.min(1, c.mean[i] + c.std[i]))}`), dn = fr.map((f, i) => `${x(f)},${y(Math.max(0, c.mean[i] - c.std[i]))}`).reverse();
+    svg.append(S("polygon", {points: up.concat(dn).join(" "), fill: css(col), opacity: 0.12}));
+    svg.append(S("polyline", {points: fr.map((f, i) => `${x(f)},${y(c.mean[i])}`).join(" "), fill: "none", stroke: css(col), "stroke-width": w}));
+    fr.forEach((f, i) => { const d = S("circle", {cx: x(f), cy: y(c.mean[i]), r: name === "SIFT" ? 4 : 3, fill: css(col)}); const tt = S("title"); tt.textContent = `${name} @ ${pct(f)}: ${fmt(c.mean[i])} ± ${fmt(c.std[i])}`; d.append(tt); svg.append(d); });
+  });
+  const lg = document.getElementById("scale-legend");
+  series.forEach(([name, col]) => lg.append(el("span", {style: "display:flex;gap:8px;align-items:center;font-size:.85rem"}, `<span class="sw" style="width:18px;height:3px;background:var(${col});display:inline-block"></span>${name}${sc.matching_fraction[name] != null ? ` <span class="muted mono">matches full data at ${pct(sc.matching_fraction[name])}</span>` : ` <span class="muted mono">never matches</span>`}`)));
+  lg.append(el("span", {style: "font-size:.85rem", class: "muted"}, "Bands: ±1 sd over seeds"));
+  const i30 = fr.indexOf(0.3), i50 = fr.indexOf(0.5);
+  document.getElementById("scale-lede").textContent =
+    `Each point trains a fresh policy on the top-ranked prefix and grades it on unseen sim episodes. ` +
+    (i30 >= 0 && i50 >= 0 ? `At 30% of the data SIFT reaches ${pct(cur.SIFT.mean[i30])}, against ${pct(cur["Filters only"].mean[i30])} for the filters alone and ${pct(cur.Random.mean[i30])} for a random subset; at 50% the gap between SIFT and filters only is ${Math.round((cur.SIFT.mean[i50] - cur["Filters only"].mean[i50]) * 100)} points. ` : "") +
+    `Most of the gain comes from removing mislabeled and noisy demos; the influence ranking adds a smaller lift on top.`;
+}
+scaling();
+
+/* strip plot by ground truth */
+function stripPlot() {
+  const svg = document.getElementById("strip-plot"); svg.innerHTML = ""; const W = 460, Hh = 250, L = 130, R = 12, Tp = 10, B = 30;
+  const tags = ["clean", "scene_reuse", "duplicate", "failed", "mislabeled"];
+  const vals = T.map(t => z(t.infl_mean)), lo = Math.min(...vals), hi = Math.max(...vals);
+  const x = v => L + (v - lo) / (hi - lo) * (W - L - R), band = (Hh - Tp - B) / tags.length;
+  svg.append(S("line", {x1: x(0), x2: x(0), y1: Tp, y2: Hh - B, class: "axis"}));
+  [Math.ceil(lo), 0, Math.floor(hi)].forEach(v => { const t = S("text", {x: x(v), y: Hh - B + 16, "text-anchor": "middle"}); t.textContent = (v > 0 ? "+" : "") + v; svg.append(t); });
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  tags.forEach((tg, r) => {
+    const cy = Tp + band * (r + 0.5);
+    const lab = S("text", {x: L - 10, y: cy + 4, "text-anchor": "end"}); lab.textContent = TAGLABEL[tg]; svg.append(lab);
+    T.filter(t => t.tag === tg).forEach(t => { const c = S("circle", {cx: x(z(t.infl_mean)), cy: cy + (rnd() - 0.5) * band * 0.6, r: 2.6, fill: vcol(t.verdict), opacity: 0.85}); const tt = S("title"); tt.textContent = `#${t.id} ${VLABEL[t.verdict]}`; c.append(tt); c.style.cursor = "pointer"; c.addEventListener("click", () => { select(t.id); document.getElementById("h-explore").scrollIntoView({behavior: "smooth"}); }); svg.append(c); });
+  });
+  const xl = S("text", {x: (L + W - R) / 2, y: Hh - 2, "text-anchor": "middle"}); xl.textContent = "influence (sd units) · dot colour = SIFT verdict"; svg.append(xl);
+}
+stripPlot();
+
+/* seed scatter (ranks) */
+function seedScatter() {
+  const svg = document.getElementById("seed-scatter"); svg.innerHTML = ""; const W = 460, Hh = 250, L = 46, R = 12, Tp = 10, B = 34;
+  const rank = arr => { const idx = arr.map((v, i) => [v, i]).sort((a, b) => a[0] - b[0]); const r = new Array(arr.length); idx.forEach(([, i], k) => r[i] = k / (arr.length - 1)); return r; };
+  const a = rank(T.map(t => t.infl_seeds[0])), b = rank(T.map(t => t.infl_seeds[1]));
+  const side = Math.min(W - L - R, Hh - Tp - B), ox = L + (W - L - R - side) / 2;
+  const x = v => ox + v * side, y = v => Tp + (1 - v) * side;
+  svg.append(S("rect", {x: ox, y: Tp, width: side, height: side, fill: "none", class: "axis"}));
+  svg.append(S("line", {x1: x(0), y1: y(0), x2: x(1), y2: y(1), class: "axis", "stroke-dasharray": "4 4"}));
+  T.forEach((t, i) => svg.append(S("circle", {cx: x(a[i]), cy: y(b[i]), r: 2.4, fill: vcol(t.verdict), opacity: 0.8})));
+  const xl = S("text", {x: ox + side / 2, y: Hh - 8, "text-anchor": "middle"}); xl.textContent = "rank under seed 0 →"; svg.append(xl);
+  const yl = S("text", {x: ox - 8, y: Tp + side / 2, "text-anchor": "end"}); yl.textContent = "seed 1"; svg.append(yl);
+  const rho = offdiag(D.stability.spearman);
+  document.getElementById("stab-lede").textContent = `Same data, same recipe, different random seed. Spearman ρ between seeds: ${rho.map(r => fmt(r)).join(", ")}. The bad demos stay at the bottom; the order among good demos mostly does not survive a reseed, which is why SIFT ranks by a pessimistic bound across seeds.`;
+}
+seedScatter();
+
+/* detection + ablation tables */
+(function tables() {
+  const d = D.detection, rows = [
+    ["Instruction mismatch (judge)", d.mismatch_judge],
+    ["Duplicates, action space (pairs)", d.duplicates_action_space],
+    ["Duplicates, scene/image space (pairs)", d.duplicates_scene_space],
+    ["Noisy-motion flag vs failed demos", d.noisy_flag],
+    ["All removals vs mislabeled + failed", d.removed_vs_bad],
+  ];
+  document.getElementById("det").innerHTML = `<thead><tr><th>Detector</th><th>Precision</th><th>Recall</th><th>Flagged / actual</th></tr></thead><tbody>` +
+    rows.map(([n, m]) => `<tr><td>${n}</td><td class="num">${pct(m.precision)}</td><td class="num">${pct(m.recall)}</td><td class="num">${m.flagged} / ${m.actual}</td></tr>`).join("") +
+    `<tr><td>Duplicate clusters reduced to one kept demo</td><td class="num" colspan="3">${d.clusters_collapsed.collapsed} / ${d.clusters_collapsed.clusters}</td></tr></tbody>`;
+  document.getElementById("abl").innerHTML = `<thead><tr><th>Validation gradient</th><th>Precond.</th><th>AUROC bad</th><th>Seed ρ</th></tr></thead><tbody>` +
+    D.ablation.map(a => `<tr${a.val_mode === cfg.val_mode && a.precondition === cfg.precondition ? ' style="font-weight:600"' : ""}><td>${a.val_mode === "rollout" ? "Sim rollouts, expert-relabelled" : "Held-out expert demos"}</td><td>${a.precondition ? "Adam" : "none"}</td><td class="num">${fmt(a.auroc_bad)}</td><td class="num">${fmt(a.seed_spearman)}</td></tr>`).join("") + `</tbody>`;
+})();
+
+/* caveats */
+[
+  "The simulator is a 2D reaching task with a tight success radius, so label noise hurts it more than it would hurt many real tasks. The size of the full-data vs curated gap is specific to this setup.",
+  "Corruptions are synthetic and fairly clean-cut: duplicates are near-exact replays, mislabels swap one colour for another. Real near-duplicates and ambiguous instructions are harder, and perfect duplicate scores here mostly show the injected duplicates are easy.",
+  `Influence ranks are only moderately stable across seeds (ρ ≈ ${fmt(mean(offdiag(D.stability.spearman)))}). The filters (judge, dedup, motion quality) carry most of the gain; the influence ordering adds a smaller, seed-sensitive lift.`,
+  "The rollout validation gradient needs an expert that can relabel arbitrary states. A scripted expert provides that here; on real robots you would use human corrections, a privileged sim policy, or fall back to held-out demos, which this run shows is much weaker.",
+  `${cfg.seeds.length} seeds is enough to see variance, not to pin it down. Run with more seeds before publishing a number.`,
+].forEach(c => document.getElementById("caveats").append(el("li", {}, c)));
+
+renderRows(); drawScene(); renderDetail();
+const mq = matchMedia("(prefers-color-scheme: dark)");
+const redraw = () => { drawScene(); scaling(); stripPlot(); seedScatter(); };
+mq.addEventListener ? mq.addEventListener("change", redraw) : mq.addListener(redraw);
+new MutationObserver(redraw).observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]});
+})();
+</script>

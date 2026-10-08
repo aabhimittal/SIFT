@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sift-curation"
+version = "0.1.0"
+description = "Marginal-value curation for robot demonstration data: TracIn influence, action-space dedup, instruction consistency."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+vlm = ["anthropic"]
+dev = ["pytest"]
+
+[project.scripts]
+sift = "sift.cli:main"
+
+[tool.setuptools]
+packages = ["sift"]
+
+[tool.setuptools.package-data]
+sift = ["report_template.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
