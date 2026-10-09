@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sift-curation"
-version = "0.1.0"
+version = "0.2.0"
 description = "Marginal-value curation for robot demonstration data: TracIn influence, action-space dedup, instruction consistency."
 readme = "README.md"
 license = { file = "LICENSE" }

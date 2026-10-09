@@ -12,7 +12,22 @@ python -m sift demo         # ~2.5 min on 4 cores; writes report/index.html
 python -m sift demo --quick # ~40 s first look
 ```
 
+`demo` writes `report/index.html` (interactive report), `report/ranking.csv` (one row per demo, best first), `report/results.json` (everything the page shows) and `report/demos.npz` (the generated dataset).
+
+| Command | What it does |
+|---|---|
+| `sift demo` | Generate a corrupted synthetic dataset, curate it, write the report |
+| `sift curate --data demos.npz` | Same pipeline on your own `.npz` (ground truth optional) |
+| `sift export --data demos.npz --results report/results.json --frac 0.3` | Write the top 30% of the ranking as a new dataset |
+| `sift export ... --verdicts keep,redundant` | Or keep demos by verdict instead of by budget |
+| `sift report --results report/results.json` | Re-render the page from saved results without recomputing |
+| `sift generate --out demos.npz` | Just write a synthetic dataset |
+
+Useful flags: `--seeds N`, `--steps`, `--n-checkpoints`, `--n-eval`, `--val-mode heldout`, `--no-precondition`, `--project-dim K`, `--no-ablation`, `--quick`.
+
 Open `report/index.html` for the interactive report. A pre-built copy from a 5-seed run is in [`docs/demo/index.html`](docs/demo/index.html).
+
+<p align="center"><a href="docs/demo/report.png"><img src="docs/demo/report.png" alt="SIFT curation report from the 5-seed demo run: verdict summary, ranking explorer, scaling curves, detector accuracy and validation-gradient ablation" width="640"></a></p>
 
 ## What the demo shows
 
@@ -88,7 +103,19 @@ The package is organised so the toy pieces can be swapped out:
 | `influence.expert_relabel` | Whatever can label arbitrary states: a privileged sim policy or human corrections. Without one, use `--val-mode heldout`. |
 | `CounterfactualJudge` | Works whenever instructions come from a finite set. For free-form language, use `ClaudeVLMJudge` with real frames. |
 
-`Dataset.save` and `Dataset.load` use a plain `.npz` file. `python -m sift curate --data your.npz` runs the full pipeline on it. The ground-truth fields (`tag`, `true_cluster`) only feed the detector-accuracy tables.
+Getting your demos in:
+
+```python
+from sift import Dataset
+ds = Dataset.from_arrays(obs_list, action_list, instruction_index_list)  # lengths may differ
+ds.save("mine.npz")   # then: sift curate --data mine.npz
+```
+
+A `.npz` file needs only `obs`, `actions` and `instr`. The effector path and scene layout are read back from the observation layout, and demos may have different lengths. Ground-truth fields (`tag`, `executed`, `true_cluster`) are optional. Without them, the report hides detector accuracy and the oracle reference and labels flags as candidates for review, because nothing can be graded.
+
+Each results file stores a content fingerprint of its dataset. `sift export` refuses to apply a ranking to a different dataset, even one with the same number of demos.
+
+**Large policies.** `--project-dim K` replaces each gradient with a K-dimensional Gaussian sketch before the dot products. The sketch is unbiased, with relative error about 1/√K. On the 5,058-parameter demo policy, the rank correlation with exact influence is 0.76 at K=64, 0.92 at K=256 and 0.98 at K=1024. Even K=256 adds far less noise than changing the training seed (ρ ≈ 0.5), so a few hundred dimensions are enough for ranking.
 
 ## Known weaknesses
 
@@ -109,9 +136,28 @@ sift/judge.py        Counterfactual judge, Claude VLM judge, PNG renderer
 sift/curate.py       Verdicts and ranking, plus the filters-only and TracIn-only ablations
 sift/scaling.py      Fixed-compute scaling curves
 sift/evaluate.py     Precision/recall/AUROC against ground truth
-sift/pipeline.py     End-to-end run producing results.json
+sift/pipeline.py     End-to-end run producing results.json (validated config, NaN-free output)
+sift/export.py       Ranking -> curated dataset, with fingerprint check
+sift/cli.py          demo / curate / export / report / generate
 sift/report*.{py,html}  Self-contained interactive report
-tests/               pytest suite (gradient check, detectors, judge, report)
+tests/test_sift.py         core behaviour: gradients, detectors, judge, report
+tests/test_edge_cases.py   malformed input, ragged/legacy/untagged files, single seed,
+                           degenerate statistics, bad judge responses, CLI errors
+.github/workflows/tests.yml  pytest on Python 3.10/3.12/3.13 plus a CLI smoke run
 ```
 
-Run the tests with `pip install -e '.[dev]' && pytest` (about 15 s).
+Run the tests with `pip install -e '.[dev]' && pytest` (78 tests, about 25 s).
+
+### Edge-case behaviour
+
+| Situation | Behaviour |
+|---|---|
+| Demos of different lengths | Supported end to end, including save/load |
+| More checkpoints requested than training steps | One checkpoint per step, the last one always the final step (previously none, which made every influence score 0) |
+| Most of the dataset is exact copies | Still clustered: the dedup threshold has a floor (previously it collapsed to 0 and found nothing) |
+| Constant or tied influence scores | Average ranks for ties; Spearman is reported as undefined, not ≈1 |
+| Most motion-loss values identical | The outlier rule falls back from MAD to mean absolute deviation and flags nothing if every value is equal |
+| One seed | Runs; variance-based views are hidden and the report says the ranking is untested for stability |
+| Claude judge refuses, truncates or returns off-schema JSON | Counted as no evidence for that demo; API errors still stop the run |
+| Claude judge unsure | Only a disagreement with confidence ≥ 0.5 is flagged |
+| Fewer demos than judge folds, empty selections, fractions outside (0, 1] | Clear `ValueError` (exit code 2 from the CLI) |

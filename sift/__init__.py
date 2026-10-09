@@ -7,7 +7,7 @@ from .env import EnvConfig, ReachEnv
 from .influence import run_influence, tracin
 from .judge import ClaudeVLMJudge, CounterfactualJudge
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "ClaudeVLMJudge", "CounterfactualJudge", "Curation", "Dataset", "EnvConfig", "ReachEnv", "Trajectory",
     "curate", "find_duplicates", "make_synthetic", "make_validation", "run_influence", "tracin",

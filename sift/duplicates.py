@@ -112,13 +112,27 @@ def _cluster_from_pairs(n: int, pairs) -> np.ndarray:
     return cluster
 
 
+MIN_THRESHOLD = 1e-6  # floor: exact copies (distance ~0 up to float error) always count
+
+
 def auto_threshold(nn: np.ndarray, ratio: float = 0.25) -> float:
-    """Duplicates sit far below the typical nearest-neighbour gap between independent demos."""
-    return float(ratio * np.median(nn))
+    """Duplicates sit far below the typical nearest-neighbour gap between independent demos.
+
+    When most of the dataset is exact copies the median gap is 0; the floor
+    keeps those copies detectable instead of letting the threshold collapse.
+    """
+    finite = nn[np.isfinite(nn)]
+    if len(finite) == 0:
+        return MIN_THRESHOLD
+    return float(max(ratio * np.median(finite), MIN_THRESHOLD))
 
 
 def find_duplicates(ds: Dataset, threshold: float | None = None, block_factor: float = 2.0,
                     length: int = 32, use_dtw: bool = True) -> DuplicateResult:
+    if len(ds) == 0:
+        raise ValueError("empty dataset")
+    if threshold is not None and threshold < 0:
+        raise ValueError("threshold must be >= 0")
     F = behaviour_embedding(ds, length)
     D = pairwise_dist(F)
     np.fill_diagonal(D, np.inf)
@@ -126,24 +140,26 @@ def find_duplicates(ds: Dataset, threshold: float | None = None, block_factor: f
     thr = auto_threshold(nn) if threshold is None else threshold
     v = ds.cfg.v_max
     pairs = []
-    for i, j in zip(*np.where(np.triu(D < block_factor * thr, 1))):
+    for i, j in zip(*np.where(np.triu(D <= block_factor * thr, 1))):
         if use_dtw:
             a = np.concatenate([ds[i].pos[:-1], ds[i].actions / v * 0.1], 1)
             b = np.concatenate([ds[j].pos[:-1], ds[j].actions / v * 0.1], 1)
             d = dtw(a, b)
         else:
             d = D[i, j]
-        if d < thr:
+        if d <= thr:
             pairs.append((int(i), int(j), float(d)))
     return DuplicateResult(_cluster_from_pairs(len(ds), pairs), pairs, thr, nn)
 
 
 def find_scene_duplicates(ds: Dataset, threshold: float | None = None) -> DuplicateResult:
     """The image-space baseline SIFT argues against, for comparison."""
+    if len(ds) == 0:
+        raise ValueError("empty dataset")
     F = scene_embedding(ds)
     D = pairwise_dist(F)
     np.fill_diagonal(D, np.inf)
     nn = D.min(1)
     thr = auto_threshold(nn) if threshold is None else threshold
-    pairs = [(int(i), int(j), float(D[i, j])) for i, j in zip(*np.where(np.triu(D < thr, 1)))]
+    pairs = [(int(i), int(j), float(D[i, j])) for i, j in zip(*np.where(np.triu(D <= thr, 1)))]
     return DuplicateResult(_cluster_from_pairs(len(ds), pairs), pairs, thr, nn)

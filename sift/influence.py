@@ -67,28 +67,65 @@ def validation_grad(model: MLPPolicy, theta: np.ndarray, mode: str, val: Dataset
     raise ValueError(f"unknown validation mode {mode!r}")
 
 
+VAL_MODES = ("rollout", "heldout")
+
+
+def projection(n_params: int, dim: int, seed: int = 0) -> np.ndarray:
+    """Gaussian Johnson-Lindenstrauss sketch: E[<R^T a, R^T b>] = <a, b>.
+
+    With a real policy (millions of parameters) storing an (N, P) gradient
+    matrix is impossible; projecting each gradient to ``dim`` numbers keeps
+    dot products unbiased with relative error about 1/sqrt(dim).
+    """
+    if dim < 1:
+        raise ValueError("projection dim must be >= 1")
+    return np.random.default_rng(seed).normal(0.0, 1.0 / np.sqrt(dim), size=(n_params, dim))
+
+
 def tracin(model: MLPPolicy, ckpts: list[Checkpoint], ds: Dataset, val: Dataset, env: ReachEnv,
-           mode: str = "rollout", precondition: bool = True) -> tuple[np.ndarray, np.ndarray]:
-    """Return (influence, self_influence), each shape (N,)."""
+           mode: str = "rollout", precondition: bool = True,
+           project_dim: int | None = None, project_seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
+    """Return (influence, self_influence), each shape (N,).
+
+    ``project_dim`` sketches gradients before the dot products (see ``projection``).
+    The preconditioner is split as sqrt(P) on both sides so the sketch stays unbiased.
+    """
+    if mode not in VAL_MODES:
+        raise ValueError(f"unknown validation mode {mode!r}; expected one of {VAL_MODES}")
+    if not ckpts:
+        raise ValueError("no checkpoints: influence would be identically zero")
+    R = projection(model.n_params, project_dim, project_seed) if project_dim is not None else None
     infl = np.zeros(len(ds))
     self_infl = np.zeros(len(ds))
     for ck in ckpts:
         G = trajectory_grads(model, ds, ck.theta)
         gv = validation_grad(model, ck.theta, mode, val, env)
-        P = ck.adam_v if precondition else 1.0
-        infl += ck.lr * G @ (P * gv)
-        self_infl += ck.lr * np.einsum("np,np->n", G * P, G)
+        sq = np.sqrt(ck.adam_v) if precondition else np.ones_like(gv)
+        A, b = G * sq, gv * sq
+        if R is not None:
+            A, b = A @ R, b @ R
+        infl += ck.lr * A @ b
+        self_infl += ck.lr * np.einsum("np,np->n", A, A)
     return infl, self_infl
 
 
 def rankdata(x: np.ndarray) -> np.ndarray:
+    """Ranks with ties sharing their average rank (as scipy.stats.rankdata)."""
+    x = np.asarray(x)
+    order = np.argsort(x, kind="stable")
     r = np.empty(len(x))
-    r[np.argsort(x, kind="stable")] = np.arange(len(x))
-    return r
+    r[order] = np.arange(len(x), dtype=float)
+    _, inv, counts = np.unique(x, return_inverse=True, return_counts=True)
+    sums = np.bincount(inv, weights=r)
+    return sums[inv] / counts[inv]
 
 
 def spearman(a: np.ndarray, b: np.ndarray) -> float:
-    return float(np.corrcoef(rankdata(a), rankdata(b))[0, 1])
+    """Rank correlation; NaN when either side is constant (correlation undefined)."""
+    ra, rb = rankdata(a), rankdata(b)
+    if len(ra) < 2 or ra.std() == 0 or rb.std() == 0:
+        return float("nan")
+    return float(np.corrcoef(ra, rb)[0, 1])
 
 
 @dataclass
@@ -118,6 +155,12 @@ class InfluenceResult:
                 M[a, b] = M[b, a] = spearman(self.per_seed[a], self.per_seed[b])
         return M
 
+    def mean_seed_spearman(self) -> float:
+        """Mean pairwise rank correlation across seeds; NaN with fewer than two seeds."""
+        S = self.seed_spearman()
+        off = S[np.triu_indices(len(S), 1)]
+        return float(np.nanmean(off)) if len(off) and np.isfinite(off).any() else float("nan")
+
     def topk_overlap(self, frac: float = 0.3) -> float:
         """Mean pairwise Jaccard overlap of the top-``frac`` sets across seeds."""
         k = max(1, int(frac * self.per_seed.shape[1]))
@@ -129,17 +172,20 @@ class InfluenceResult:
 
 def run_influence(ds: Dataset, val: Dataset, env: ReachEnv, seeds=(0, 1, 2), steps: int = 2500,
                   n_checkpoints: int = 10, mode: str = "rollout", precondition: bool = True,
-                  log=print) -> InfluenceResult:
+                  project_dim: int | None = None, log=print) -> InfluenceResult:
     """Train one policy per seed on the full dataset and score every trajectory against it.
 
     Seed variance is the honest error bar: TracIn in BC is noisy, and a
     ranking that flips between seeds should not drive deletion decisions.
     """
+    if not seeds:
+        raise ValueError("need at least one seed")
     X, Y, _ = ds.arrays()
     per, selfs = [], []
     for s in seeds:
         model, ckpts = train_bc(X, Y, steps=steps, seed=s, n_checkpoints=n_checkpoints)
-        infl, si = tracin(model, ckpts, ds, val, env, mode=mode, precondition=precondition)
+        infl, si = tracin(model, ckpts, ds, val, env, mode=mode, precondition=precondition,
+                          project_dim=project_dim, project_seed=s)
         per.append(infl)
         selfs.append(si)
         log(f"  influence seed {s}: policy success {env.success_rate(model):.2f}")
