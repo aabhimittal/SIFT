@@ -124,16 +124,28 @@ def train_bc(
     n_checkpoints: int = 0,
     hidden: int = 64,
 ) -> tuple[MLPPolicy, list[Checkpoint]]:
-    """Plain BC with Adam. Fixed step budget so data subsets get equal compute."""
+    """Plain BC with Adam. Fixed step budget so data subsets get equal compute.
+
+    Checkpoints are spaced evenly and the last one is always the final step,
+    so asking for more checkpoints than steps degrades to one per step instead
+    of silently returning none (which would make every influence score 0).
+    """
+    if len(X) == 0 or len(X) != len(Y):
+        raise ValueError(f"need matching, non-empty X and Y (got {len(X)} and {len(Y)} rows)")
+    if steps < 1:
+        raise ValueError("steps must be >= 1")
+    if n_checkpoints < 0:
+        raise ValueError("n_checkpoints must be >= 0")
     rng = np.random.default_rng(seed)
     pol = MLPPolicy(X.shape[1], hidden, Y.shape[1], seed=seed)
     opt = Adam(pol.n_params, lr=lr)
-    every = steps // n_checkpoints if n_checkpoints else 0
+    marks = set(np.linspace(steps, 0, min(n_checkpoints, steps), endpoint=False).round().astype(int)) \
+        if n_checkpoints else set()
     ckpts: list[Checkpoint] = []
     for s in range(1, steps + 1):
         idx = rng.integers(0, len(X), size=min(batch, len(X)))
         _, g = pol.loss_grad(X[idx], Y[idx])
         opt.step(pol.theta, g)
-        if every and s % every == 0:
+        if s in marks:
             ckpts.append(Checkpoint(s, pol.flat(), lr, opt.preconditioner()))
     return pol, ckpts

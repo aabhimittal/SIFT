@@ -68,10 +68,18 @@ class CounterfactualJudge:
 
     def __init__(self, folds: int = 3, steps: int = 2500, ratio: float = 3.0, temperature: float = 0.5,
                  seed: int = 0):
+        if folds < 2:
+            raise ValueError("cross-fitting needs folds >= 2 (folds=1 would judge demos with a policy trained on them)")
+        if ratio <= 1:
+            raise ValueError("ratio must be > 1 (1 would flag any label that is not strictly the best fit)")
+        if temperature <= 0:
+            raise ValueError("temperature must be > 0")
         self.folds, self.steps, self.ratio, self.temperature, self.seed = folds, steps, ratio, temperature, seed
 
     def judge(self, ds: Dataset) -> JudgeResult:
         n, K = len(ds), len(COLORS)
+        if n < self.folds:
+            raise ValueError(f"{n} trajectories cannot be split into {self.folds} folds")
         rng = np.random.default_rng(self.seed)
         fold = rng.permutation(n) % self.folds
         losses = np.zeros((n, K))
@@ -160,8 +168,11 @@ _VLM_PROMPT = (
 class ClaudeVLMJudge:
     """Consistency judge backed by Claude vision. Each call costs API tokens."""
 
-    def __init__(self, model: str = "claude-opus-5-5", effort: str = "low", client=None):
-        self.model, self.effort = model, effort
+    def __init__(self, model: str = "claude-opus-5-5", effort: str = "low", client=None,
+                 min_confidence: float = 0.5):
+        if not 0 <= min_confidence <= 1:
+            raise ValueError("min_confidence must be in [0, 1]")
+        self.model, self.effort, self.min_confidence = model, effort, min_confidence
         if client is None:
             import anthropic  # optional dependency: pip install sift-curation[vlm]
             client = anthropic.Anthropic()
@@ -182,27 +193,51 @@ class ClaudeVLMJudge:
             ]}],
         )
 
+    @staticmethod
+    def _no_evidence(t: Trajectory, why: str) -> dict:
+        return {"consistent": True, "confidence": 0.0, "best_instruction": t.instruction, "rationale": why}
+
     def judge_one(self, t: Trajectory) -> dict:
+        """One API call. API errors propagate (the SDK already retries 429/5xx);
+        a refusal, a truncated answer or an off-schema answer counts as no evidence,
+        so one bad response cannot sink a run over thousands of demos."""
         resp = self.client.beta.messages.create(**self.build_request(t))
         if resp.stop_reason == "refusal":
-            return {"consistent": True, "confidence": 0.0, "best_instruction": t.instruction,
-                    "rationale": "judge declined; treated as no evidence"}
-        text = next(b.text for b in resp.content if b.type == "text")
-        return json.loads(text)
+            return self._no_evidence(t, "judge declined; treated as no evidence")
+        text = next((b.text for b in resp.content if b.type == "text"), None)
+        if text is None:
+            return self._no_evidence(t, f"no text in response (stop_reason={resp.stop_reason})")
+        try:
+            r = json.loads(text)
+            if r["best_instruction"] not in INSTRUCTIONS:
+                raise ValueError(r["best_instruction"])
+            r["confidence"] = float(r["confidence"])
+            if not np.isfinite(r["confidence"]):
+                raise ValueError("confidence is not finite")
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+            return self._no_evidence(t, f"unparseable judge output ({type(e).__name__}); treated as no evidence")
+        return r
 
     def judge(self, ds: Dataset) -> JudgeResult:
+        """Flag only a confident disagreement: the judge names a different
+        instruction with confidence >= ``min_confidence``. Low-confidence or
+        no-evidence answers spread mass evenly, and an argmax over that uniform
+        row would pick index 0 and flag every non-first label, so the judge's
+        named instruction is used directly instead."""
         n, K = len(ds), len(COLORS)
         probs = np.zeros((n, K))
+        pred = np.zeros(n, dtype=int)
+        conf = np.zeros(n)
         why = []
         for i, t in enumerate(ds.trajs):
             r = self.judge_one(t)
-            best = INSTRUCTIONS.index(r["best_instruction"])
-            c = float(np.clip(r["confidence"], 0, 1))
-            probs[i] = (1 - c) / K
-            probs[i, best] += c
+            pred[i] = INSTRUCTIONS.index(r["best_instruction"])
+            conf[i] = float(np.clip(r["confidence"], 0, 1))
+            probs[i] = (1 - conf[i]) / K
+            probs[i, pred[i]] += conf[i]
             why.append(r["rationale"])
-        label = np.array([t.instr for t in ds.trajs])
+        label = np.array([t.instr for t in ds.trajs], dtype=int)
         p_label = probs[np.arange(n), label]
-        pred = probs.argmax(1)
-        excess = probs.max(1) / np.maximum(p_label, 1e-6)
-        return JudgeResult(p_label, excess, pred, probs, np.full(n, np.nan), (pred != label) & (p_label < 0.5), why)
+        excess = probs[np.arange(n), pred] / np.maximum(p_label, 1e-6)
+        mismatch = (pred != label) & (conf >= self.min_confidence)
+        return JudgeResult(p_label, excess, pred, probs, np.full(n, np.nan), mismatch, why)

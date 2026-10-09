@@ -29,9 +29,26 @@ VERDICTS = ("keep", "redundant", "harmful", "noisy", "mismatch")
 
 
 def robust_outliers(x: np.ndarray, k: float) -> np.ndarray:
-    med = np.median(x)
-    mad = np.median(np.abs(x - med)) * 1.4826
-    return x > med + k * max(mad, 1e-12)
+    """Flag values above median + k robust-sd. NaNs are never flagged.
+
+    When more than half the values are identical the MAD is 0, and a naive
+    threshold flags any value a hair above the median. Fall back to the mean
+    absolute deviation (scaled to sd), and flag nothing if that is 0 too.
+    """
+    x = np.asarray(x, dtype=float)
+    out = np.zeros(len(x), bool)
+    ok = np.isfinite(x)
+    if ok.sum() < 3:
+        return out
+    v = x[ok]
+    med = np.median(v)
+    spread = np.median(np.abs(v - med)) * 1.4826
+    if spread == 0:
+        spread = np.mean(np.abs(v - med)) * 1.2533
+    if spread == 0:
+        return out
+    out[ok] = v > med + k * spread
+    return out
 
 
 @dataclass
@@ -42,6 +59,9 @@ class Curation:
     representative: np.ndarray  # (N,) for redundant items, the index of the kept twin; else -1
 
     def subset(self, frac: float) -> np.ndarray:
+        """Top-``frac`` prefix of the ranking (at least one trajectory)."""
+        if not 0 < frac <= 1:
+            raise ValueError(f"fraction must be in (0, 1], got {frac}")
         return self.order[: max(1, int(round(frac * len(self.order))))]
 
     def counts(self) -> dict[str, int]:
@@ -51,12 +71,13 @@ class Curation:
 def curate(infl: InfluenceResult, dups: DuplicateResult, judge: JudgeResult,
            k_std: float = 1.0, noisy_k: float = 4.0) -> Curation:
     n = len(infl.mean)
+    if not (len(dups.cluster) == len(judge.mismatch) == n):
+        raise ValueError("influence, duplicate and judge results cover different numbers of trajectories")
     lcb = infl.mean - k_std * infl.std
     ucb = infl.mean + k_std * infl.std
     verdict = np.array(["keep"] * n, dtype=object)
     verdict[ucb < 0] = "harmful"
-    verdict[robust_outliers(judge.oof_loss, noisy_k) if np.isfinite(judge.oof_loss).all()
-            else np.zeros(n, bool)] = "noisy"
+    verdict[robust_outliers(judge.oof_loss, noisy_k)] = "noisy"
     verdict[judge.mismatch] = "mismatch"
 
     # Within each duplicate cluster keep the member with the best LCB among

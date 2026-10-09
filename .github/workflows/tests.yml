@@ -1,0 +1,26 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e '.[dev]'
+      - run: pytest -q
+      - name: CLI smoke test
+        run: |
+          sift demo --quick --seeds 1 --steps 200 --n-eval 20 --out smoke
+          sift export --data smoke/demos.npz --results smoke/results.json --frac 0.5 --out smoke/curated.npz
+          sift report --results smoke/results.json --out smoke
