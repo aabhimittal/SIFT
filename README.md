@@ -27,6 +27,8 @@ Useful flags: `--seeds N`, `--steps`, `--n-checkpoints`, `--n-eval`, `--val-mode
 
 Open `report/index.html` for the interactive report. A pre-built copy from a 5-seed run is in [`docs/demo/index.html`](docs/demo/index.html).
 
+<p align="center"><a href="docs/demo/report.png"><img src="docs/demo/report.png" alt="SIFT curation report from the 5-seed demo run: verdict summary, ranking explorer, scaling curves, detector accuracy and validation-gradient ablation" width="640"></a></p>
+
 ## What the demo shows
 
 The demo generates 274 demonstrations of a language-conditioned reaching task ("reach the red/green/blue target") with known corruptions injected: 56 near-duplicate replays across 8 clusters, 20 mislabelled instructions, 20 failed or hesitant demos, and 20 demos that reuse another demo's scene for a different task. Because the corruptions are known, every detector is graded against ground truth.
